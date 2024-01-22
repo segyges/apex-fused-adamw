@@ -1,29 +1,34 @@
+import glob
+import os
+import subprocess
 import sys
 import warnings
-import os
-import glob
-from packaging.version import parse, Version
-
-from setuptools import setup, find_packages
-import subprocess
 
 import torch
+from packaging.version import Version, parse
+from setuptools import find_packages, setup
 from torch.utils.cpp_extension import (
+    CUDA_HOME,
     BuildExtension,
     CppExtension,
     CUDAExtension,
-    CUDA_HOME,
     load,
 )
 
-PYTORCH_HOME = os.path.abspath(os.environ['PYTORCH_HOME']) if 'PYTORCH_HOME' in os.environ else None
+PYTORCH_HOME = (
+    os.path.abspath(os.environ["PYTORCH_HOME"])
+    if "PYTORCH_HOME" in os.environ
+    else None
+)
 
 # ninja build does not work unless include_dirs are abs path
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 def get_cuda_bare_metal_version(cuda_dir):
-    raw_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True)
+    raw_output = subprocess.check_output(
+        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
+    )
     output = raw_output.split()
     release_idx = output.index("release") + 1
     bare_metal_version = parse(output[release_idx].split(",")[0])
@@ -38,7 +43,7 @@ def check_cuda_torch_binary_vs_bare_metal(cuda_dir):
     print("\nCompiling cuda extensions with")
     print(raw_output + "from " + cuda_dir + "/bin\n")
 
-    if (bare_metal_version != torch_binary_version):
+    if bare_metal_version != torch_binary_version:
         raise RuntimeError(
             "Cuda extensions are being compiled with a version of Cuda that does "
             "not match the version used to compile Pytorch binaries.  "
@@ -59,7 +64,9 @@ def raise_if_cuda_home_none(global_option: str) -> None:
     )
 
 
-def check_cudnn_version_and_warn(global_option: str, required_cudnn_version: int) -> bool:
+def check_cudnn_version_and_warn(
+    global_option: str, required_cudnn_version: int
+) -> bool:
     cudnn_available = torch.backends.cudnn.is_available()
     cudnn_version = torch.backends.cudnn.version() if cudnn_available else None
     if not (cudnn_available and (cudnn_version >= required_cudnn_version)):
@@ -112,7 +119,8 @@ extras = {}
 if "--cpp_ext" in sys.argv or "--cuda_ext" in sys.argv:
     if TORCH_MAJOR == 0:
         raise RuntimeError(
-            "--cpp_ext requires Pytorch 1.0 or later, " "found torch.__version__ = {}".format(torch.__version__)
+            "--cpp_ext requires Pytorch 1.0 or later, "
+            "found torch.__version__ = {}".format(torch.__version__)
         )
 
 if "--cpp_ext" in sys.argv:
@@ -138,42 +146,6 @@ version_dependent_macros = version_ge_1_1 + version_ge_1_3 + version_ge_1_5
 
 _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
 
-if "--distributed_adam" in sys.argv:
-    sys.argv.remove("--distributed_adam")
-    raise_if_cuda_home_none("--distributed_adam")
-    ext_modules.append(
-        CUDAExtension(
-            name="distributed_adam_cuda",
-            sources=[
-                "apex/contrib/csrc/optimizers/multi_tensor_distopt_adam.cpp",
-                "apex/contrib/csrc/optimizers/multi_tensor_distopt_adam_kernel.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3", "--use_fast_math"] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--distributed_lamb" in sys.argv:
-    sys.argv.remove("--distributed_lamb")
-    raise_if_cuda_home_none("--distributed_lamb")
-    ext_modules.append(
-        CUDAExtension(
-            name="distributed_lamb_cuda",
-            sources=[
-                "apex/contrib/csrc/optimizers/multi_tensor_distopt_lamb.cpp",
-                "apex/contrib/csrc/optimizers/multi_tensor_distopt_lamb_kernel.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3", "--use_fast_math"] + version_dependent_macros,
-            },
-        )
-    )
-
 if "--cuda_ext" in sys.argv:
     sys.argv.remove("--cuda_ext")
     raise_if_cuda_home_none("--cuda_ext")
@@ -184,19 +156,7 @@ if "--cuda_ext" in sys.argv:
             name="amp_C",
             sources=[
                 "csrc/amp_C_frontend.cpp",
-                "csrc/multi_tensor_sgd_kernel.cu",
-                "csrc/multi_tensor_scale_kernel.cu",
-                "csrc/multi_tensor_axpby_kernel.cu",
-                "csrc/multi_tensor_l2norm_kernel.cu",
-                "csrc/multi_tensor_l2norm_kernel_mp.cu",
-                "csrc/multi_tensor_l2norm_scale_kernel.cu",
-                "csrc/multi_tensor_lamb_stage_1.cu",
-                "csrc/multi_tensor_lamb_stage_2.cu",
                 "csrc/multi_tensor_adam.cu",
-                "csrc/multi_tensor_adagrad.cu",
-                "csrc/multi_tensor_novograd.cu",
-                "csrc/multi_tensor_lamb.cu",
-                "csrc/multi_tensor_lamb_mp.cu",
             ],
             extra_compile_args={
                 "cxx": ["-O3"] + version_dependent_macros,
@@ -205,133 +165,13 @@ if "--cuda_ext" in sys.argv:
                     "-O3",
                     # '--resource-usage',
                     "--use_fast_math",
-                ] + version_dependent_macros,
-            },
-        )
-    )
-    ext_modules.append(
-        CUDAExtension(
-            name="syncbn",
-            sources=["csrc/syncbn.cpp", "csrc/welford.cu"],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="fused_layer_norm_cuda",
-            sources=["csrc/layer_norm_cuda.cpp", "csrc/layer_norm_cuda_kernel.cu"],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-maxrregcount=50", "-O3", "--use_fast_math"] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="mlp_cuda",
-            sources=["csrc/mlp.cpp", "csrc/mlp_cuda.cu"],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros,
-            },
-        )
-    )
-    ext_modules.append(
-        CUDAExtension(
-            name="fused_dense_cuda",
-            sources=["csrc/fused_dense.cpp", "csrc/fused_dense_cuda.cu"],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="scaled_upper_triang_masked_softmax_cuda",
-            sources=[
-                "csrc/megatron/scaled_upper_triang_masked_softmax.cpp",
-                "csrc/megatron/scaled_upper_triang_masked_softmax_cuda.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                ] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="generic_scaled_masked_softmax_cuda",
-            sources=[
-                "csrc/megatron/generic_scaled_masked_softmax.cpp",
-                "csrc/megatron/generic_scaled_masked_softmax_cuda.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                ] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="scaled_masked_softmax_cuda",
-            sources=["csrc/megatron/scaled_masked_softmax.cpp", "csrc/megatron/scaled_masked_softmax_cuda.cu"],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                ] + version_dependent_macros,
-            },
-        )
-    )
-
-    ext_modules.append(
-        CUDAExtension(
-            name="scaled_softmax_cuda",
-            sources=["csrc/megatron/scaled_softmax.cpp", "csrc/megatron/scaled_softmax_cuda.cu"],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                ] + version_dependent_macros,
+                ]
+                + version_dependent_macros,
             },
         )
     )
 
     if bare_metal_version >= Version("11.0"):
-
         cc_flag = []
         cc_flag.append("-gencode")
         cc_flag.append("arch=compute_70,code=sm_70")
@@ -362,17 +202,21 @@ if "--cuda_ext" in sys.argv:
                         "--expt-relaxed-constexpr",
                         "--expt-extended-lambda",
                         "--use_fast_math",
-                    ] + version_dependent_macros + cc_flag,
+                    ]
+                    + version_dependent_macros
+                    + cc_flag,
                 },
             )
         )
 
 if PYTORCH_HOME is not None and os.path.exists(PYTORCH_HOME):
     nvfuser_is_refactored = "nvfuser" in (
-        os.path.join(d) for d in os.listdir(os.path.join(PYTORCH_HOME, "third_party"))
+        os.path.join(d)
+        for d in os.listdir(os.path.join(PYTORCH_HOME, "third_party"))
         if os.path.isdir(os.path.join(os.path.join(PYTORCH_HOME, "third_party"), d))
     )
     import nvfuser  # NOQA
+
     print(PYTORCH_HOME)
     include_dirs = [PYTORCH_HOME]
     library_dirs = []
@@ -383,172 +227,19 @@ if PYTORCH_HOME is not None and os.path.exists(PYTORCH_HOME):
         extra_link_args.append("-lnvfuser_codegen")
     ext_modules.append(
         CUDAExtension(
-            name='instance_norm_nvfuser_cuda',
+            name="instance_norm_nvfuser_cuda",
             sources=[
-                'csrc/instance_norm_nvfuser.cpp',
-                'csrc/instance_norm_nvfuser_kernel.cu',
+                "csrc/instance_norm_nvfuser.cpp",
+                "csrc/instance_norm_nvfuser_kernel.cu",
             ],
             include_dirs=include_dirs,
             library_dirs=library_dirs,
             extra_link_args=extra_link_args,
             extra_compile_args={
                 "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros + [f"-DNVFUSER_THIRDPARTY={int(nvfuser_is_refactored)}"],
-            },
-        )
-    )
-
-if "--permutation_search" in sys.argv:
-    sys.argv.remove("--permutation_search")
-
-    if CUDA_HOME is None:
-        raise RuntimeError("--permutation_search was requested, but nvcc was not found.  Are you sure your environment has nvcc available?  If you're installing within a container from https://hub.docker.com/r/pytorch/pytorch, only images whose names contain 'devel' will provide nvcc.")
-    else:
-        cc_flag = ['-Xcompiler', '-fPIC', '-shared']
-        ext_modules.append(
-            CUDAExtension(name='permutation_search_cuda',
-                          sources=['apex/contrib/sparsity/permutation_search_kernels/CUDA_kernels/permutation_search_kernels.cu'],
-                          include_dirs=[os.path.join(this_dir, 'apex', 'contrib', 'sparsity', 'permutation_search_kernels', 'CUDA_kernels')],
-                          extra_compile_args={'cxx': ['-O3'] + version_dependent_macros,
-                                              'nvcc':['-O3'] + version_dependent_macros + cc_flag}))
-
-if "--bnp" in sys.argv:
-    sys.argv.remove("--bnp")
-    raise_if_cuda_home_none("--bnp")
-    ext_modules.append(
-        CUDAExtension(
-            name="bnp",
-            sources=[
-                "apex/contrib/csrc/groupbn/batch_norm.cu",
-                "apex/contrib/csrc/groupbn/ipc.cu",
-                "apex/contrib/csrc/groupbn/interface.cpp",
-                "apex/contrib/csrc/groupbn/batch_norm_add_relu.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": [] + version_dependent_macros,
-                "nvcc": [
-                    "-DCUDA_HAS_FP16=1",
-                    "-D__CUDA_NO_HALF_OPERATORS__",
-                    "-D__CUDA_NO_HALF_CONVERSIONS__",
-                    "-D__CUDA_NO_HALF2_OPERATORS__",
-                ] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--xentropy" in sys.argv:
-    sys.argv.remove("--xentropy")
-    raise_if_cuda_home_none("--xentropy")
-    ext_modules.append(
-        CUDAExtension(
-            name="xentropy_cuda",
-            sources=["apex/contrib/csrc/xentropy/interface.cpp", "apex/contrib/csrc/xentropy/xentropy_kernel.cu"],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--focal_loss" in sys.argv:
-    sys.argv.remove("--focal_loss")
-    raise_if_cuda_home_none("--focal_loss")
-    ext_modules.append(
-        CUDAExtension(
-            name='focal_loss_cuda',
-            sources=[
-                'apex/contrib/csrc/focal_loss/focal_loss_cuda.cpp',
-                'apex/contrib/csrc/focal_loss/focal_loss_cuda_kernel.cu',
-            ],
-            include_dirs=[os.path.join(this_dir, 'csrc')],
-            extra_compile_args={
-                'cxx': ['-O3'] + version_dependent_macros,
-                'nvcc':['-O3', '--use_fast_math', '--ftz=false'] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--group_norm" in sys.argv:
-    sys.argv.remove("--group_norm")
-    raise_if_cuda_home_none("--group_norm")
-
-    # CUDA group norm supports from SM70
-    arch_flags = []
-    for arch in [70, 75, 80, 86, 90]:
-        arch_flag = f"-gencode=arch=compute_{arch},code=sm_{arch}"
-        arch_flags.append(arch_flag)
-    arch_flag = f"-gencode=arch=compute_90,code=compute_90"
-    arch_flags.append(arch_flag)
-
-    ext_modules.append(
-        CUDAExtension(
-            name="group_norm_cuda",
-            sources=[
-                "apex/contrib/csrc/group_norm/group_norm_nhwc_op.cpp",
-            ] + glob.glob("apex/contrib/csrc/group_norm/*.cu"),
-            include_dirs=[os.path.join(this_dir, 'csrc')],
-            extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"] + version_dependent_macros,
-                "nvcc": [
-                    "-O3", "-std=c++17", "--use_fast_math", "--ftz=false",
-                ] + arch_flags + version_dependent_macros,
-            },
-        )
-    )
-
-if "--index_mul_2d" in sys.argv:
-    sys.argv.remove("--index_mul_2d")
-    raise_if_cuda_home_none("--index_mul_2d")
-    ext_modules.append(
-        CUDAExtension(
-            name='fused_index_mul_2d',
-            sources=[
-                'apex/contrib/csrc/index_mul_2d/index_mul_2d_cuda.cpp',
-                'apex/contrib/csrc/index_mul_2d/index_mul_2d_cuda_kernel.cu',
-            ],
-            include_dirs=[os.path.join(this_dir, 'csrc')],
-            extra_compile_args={
-                'cxx': ['-O3'] + version_dependent_macros,
-                'nvcc':['-O3', '--use_fast_math', '--ftz=false'] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--deprecated_fused_adam" in sys.argv:
-    sys.argv.remove("--deprecated_fused_adam")
-    raise_if_cuda_home_none("--deprecated_fused_adam")
-    ext_modules.append(
-        CUDAExtension(
-            name="fused_adam_cuda",
-            sources=[
-                "apex/contrib/csrc/optimizers/fused_adam_cuda.cpp",
-                "apex/contrib/csrc/optimizers/fused_adam_cuda_kernel.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3", "--use_fast_math"] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--deprecated_fused_lamb" in sys.argv:
-    sys.argv.remove("--deprecated_fused_lamb")
-    raise_if_cuda_home_none("--deprecated_fused_lamb")
-    ext_modules.append(
-        CUDAExtension(
-            name="fused_lamb_cuda",
-            sources=[
-                "apex/contrib/csrc/optimizers/fused_lamb_cuda.cpp",
-                "apex/contrib/csrc/optimizers/fused_lamb_cuda_kernel.cu",
-                "csrc/multi_tensor_l2norm_kernel.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3", "--use_fast_math"] + version_dependent_macros,
+                "nvcc": ["-O3"]
+                + version_dependent_macros
+                + [f"-DNVFUSER_THIRDPARTY={int(nvfuser_is_refactored)}"],
             },
         )
     )
@@ -560,278 +251,21 @@ torch_dir = torch.__path__[0]
 if os.path.exists(os.path.join(torch_dir, "include", "ATen", "CUDAGeneratorImpl.h")):
     generator_flag = ["-DOLD_GENERATOR_PATH"]
 
-if "--fast_layer_norm" in sys.argv:
-    sys.argv.remove("--fast_layer_norm")
-    raise_if_cuda_home_none("--fast_layer_norm")
-
-    cc_flag = []
-    cc_flag.append("-gencode")
-    cc_flag.append("arch=compute_70,code=sm_70")
-
-    if bare_metal_version >= Version("11.0"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_80,code=sm_80")
-    if bare_metal_version >= Version("11.8"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_90,code=sm_90")
-
-    ext_modules.append(
-        CUDAExtension(
-            name="fast_layer_norm",
-            sources=[
-                "apex/contrib/csrc/layer_norm/ln_api.cpp",
-                "apex/contrib/csrc/layer_norm/ln_fwd_cuda_kernel.cu",
-                "apex/contrib/csrc/layer_norm/ln_bwd_semi_cuda_kernel.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros + generator_flag,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "-U__CUDA_NO_BFLOAT16_OPERATORS__",
-                    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
-                    "-U__CUDA_NO_BFLOAT162_OPERATORS__",
-                    "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
-                    "-I./apex/contrib/csrc/layer_norm/",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                    "--use_fast_math",
-                ] + version_dependent_macros + generator_flag + cc_flag,
-            },
-            include_dirs=[os.path.join(this_dir, "apex/contrib/csrc/layer_norm")],
-        )
-    )
-
-if "--fmha" in sys.argv:
-    sys.argv.remove("--fmha")
-    raise_if_cuda_home_none("--fmha")
-
-    if bare_metal_version < Version("11.0"):
-        raise RuntimeError("--fmha only supported on sm_80 and sm_90 GPUs")
-
-    cc_flag = []
-    cc_flag.append("-gencode")
-    cc_flag.append("arch=compute_80,code=sm_80")
-    if bare_metal_version >= Version("11.8"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_90,code=sm_90")
-
-    ext_modules.append(
-        CUDAExtension(
-            name="fmhalib",
-            sources=[
-                "apex/contrib/csrc/fmha/fmha_api.cpp",
-                "apex/contrib/csrc/fmha/src/fmha_fill.cu",
-                "apex/contrib/csrc/fmha/src/fmha_noloop_reduce.cu",
-                "apex/contrib/csrc/fmha/src/fmha_fprop_fp16_128_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_fprop_fp16_256_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_fprop_fp16_384_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_fprop_fp16_512_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_dgrad_fp16_128_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_dgrad_fp16_256_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_dgrad_fp16_384_64_kernel.sm80.cu",
-                "apex/contrib/csrc/fmha/src/fmha_dgrad_fp16_512_64_kernel.sm80.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros + generator_flag,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                    "--use_fast_math",
-                ] + version_dependent_macros + generator_flag + cc_flag,
-            },
-            include_dirs=[
-                os.path.join(this_dir, "apex/contrib/csrc"),
-                os.path.join(this_dir, "apex/contrib/csrc/fmha/src"),
-            ],
-        )
-    )
-
-
-if "--fast_multihead_attn" in sys.argv:
-    sys.argv.remove("--fast_multihead_attn")
-    raise_if_cuda_home_none("--fast_multihead_attn")
-
-    cc_flag = []
-    cc_flag.append("-gencode")
-    cc_flag.append("arch=compute_70,code=sm_70")
-
-    if bare_metal_version >= Version("11.0"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_80,code=sm_80")
-    if bare_metal_version >= Version("11.1"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_86,code=sm_86")
-    if bare_metal_version >= Version("11.8"):
-        cc_flag.append("-gencode")
-        cc_flag.append("arch=compute_90,code=sm_90")
-
-    subprocess.run(["git", "submodule", "update", "--init", "apex/contrib/csrc/multihead_attn/cutlass"])
-    ext_modules.append(
-        CUDAExtension(
-            name="fast_multihead_attn",
-            sources=[
-                "apex/contrib/csrc/multihead_attn/multihead_attn_frontend.cpp",
-                "apex/contrib/csrc/multihead_attn/additive_masked_softmax_dropout_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/masked_softmax_dropout_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/encdec_multihead_attn_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/encdec_multihead_attn_norm_add_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/self_multihead_attn_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/self_multihead_attn_bias_additive_mask_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/self_multihead_attn_bias_cuda.cu",
-                "apex/contrib/csrc/multihead_attn/self_multihead_attn_norm_add_cuda.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros + generator_flag,
-                "nvcc": [
-                    "-O3",
-                    "-U__CUDA_NO_HALF_OPERATORS__",
-                    "-U__CUDA_NO_HALF_CONVERSIONS__",
-                    "--expt-relaxed-constexpr",
-                    "--expt-extended-lambda",
-                    "--use_fast_math",
-                ]
-                + version_dependent_macros
-                + generator_flag
-                + cc_flag,
-            },
-            include_dirs=[
-                os.path.join(this_dir, "apex/contrib/csrc/multihead_attn/cutlass/include/"),
-                os.path.join(this_dir, "apex/contrib/csrc/multihead_attn/cutlass/tools/util/include")
-            ],
-        )
-    )
-
-if "--transducer" in sys.argv:
-    sys.argv.remove("--transducer")
-    raise_if_cuda_home_none("--transducer")
-    ext_modules.append(
-        CUDAExtension(
-            name="transducer_joint_cuda",
-            sources=[
-                "apex/contrib/csrc/transducer/transducer_joint.cpp",
-                "apex/contrib/csrc/transducer/transducer_joint_kernel.cu",
-            ],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros + generator_flag,
-                "nvcc": ["-O3"] + version_dependent_macros + generator_flag,
-            },
-            include_dirs=[os.path.join(this_dir, "csrc"), os.path.join(this_dir, "apex/contrib/csrc/multihead_attn")],
-        )
-    )
-    ext_modules.append(
-        CUDAExtension(
-            name="transducer_loss_cuda",
-            sources=[
-                "apex/contrib/csrc/transducer/transducer_loss.cpp",
-                "apex/contrib/csrc/transducer/transducer_loss_kernel.cu",
-            ],
-            include_dirs=[os.path.join(this_dir, "csrc")],
-            extra_compile_args={
-                "cxx": ["-O3"] + version_dependent_macros,
-                "nvcc": ["-O3"] + version_dependent_macros,
-            },
-        )
-    )
-
-if "--cudnn_gbn" in sys.argv:
-    sys.argv.remove("--cudnn_gbn")
-    raise_if_cuda_home_none("--cudnn_gbn")
-    if check_cudnn_version_and_warn("--cudnn_gbn", 8500):
-        subprocess.run(["git", "submodule", "update", "--init", "apex/contrib/csrc/cudnn-frontend/"])
-        ext_modules.append(
-            CUDAExtension(
-                name="cudnn_gbn_lib",
-                sources=[
-                    "apex/contrib/csrc/cudnn_gbn/norm_sample.cpp",
-                    "apex/contrib/csrc/cudnn_gbn/cudnn_gbn.cpp",
-                ],
-                include_dirs=[os.path.join(this_dir, "apex/contrib/csrc/cudnn-frontend/include")],
-                extra_compile_args={"cxx": ["-O3", "-g"] + version_dependent_macros + generator_flag},
-            )
-        )
-
-if "--peer_memory" in sys.argv:
-    sys.argv.remove("--peer_memory")
-    raise_if_cuda_home_none("--peer_memory")
-    ext_modules.append(
-        CUDAExtension(
-            name="peer_memory_cuda",
-            sources=[
-                "apex/contrib/csrc/peer_memory/peer_memory_cuda.cu",
-                "apex/contrib/csrc/peer_memory/peer_memory.cpp",
-            ],
-            extra_compile_args={"cxx": ["-O3"] + version_dependent_macros + generator_flag},
-        )
-    )
-
-# NOTE: Requires NCCL >= 2.10.3
-if "--nccl_p2p" in sys.argv:
-    sys.argv.remove("--nccl_p2p")
-    raise_if_cuda_home_none("--nccl_p2p")
-    # Check NCCL version.
-    _nccl_version_getter = load(
-        name="_nccl_version_getter",
-        sources=["apex/contrib/csrc/nccl_p2p/nccl_version.cpp", "apex/contrib/csrc/nccl_p2p/nccl_version_check.cu"],
-
-    )
-    _available_nccl_version = _nccl_version_getter.get_nccl_version()
-    if _available_nccl_version >= (2, 10):
-        ext_modules.append(
-            CUDAExtension(
-                name="nccl_p2p_cuda",
-                sources=[
-                    "apex/contrib/csrc/nccl_p2p/nccl_p2p_cuda.cu",
-                    "apex/contrib/csrc/nccl_p2p/nccl_p2p.cpp",
-                ],
-                extra_compile_args={"cxx": ["-O3"] + version_dependent_macros + generator_flag},
-            )
-        )
-    else:
-        warnings.warn(
-            f"Skip `--nccl_p2p` as it requires NCCL 2.10.3 or later, but {_available_nccl_version[0]}.{_available_nccl_version[1]}"
-        )
-
-# note (mkozuki): Now `--fast_bottleneck` option (i.e. apex/contrib/bottleneck) depends on `--peer_memory` and `--nccl_p2p`.
-if "--fast_bottleneck" in sys.argv:
-    sys.argv.remove("--fast_bottleneck")
-    raise_if_cuda_home_none("--fast_bottleneck")
-    if check_cudnn_version_and_warn("--fast_bottleneck", 8400):
-        subprocess.run(["git", "submodule", "update", "--init", "apex/contrib/csrc/cudnn-frontend/"])
-        ext_modules.append(
-            CUDAExtension(
-                name="fast_bottleneck",
-                sources=["apex/contrib/csrc/bottleneck/bottleneck.cpp"],
-                include_dirs=[os.path.join(this_dir, "apex/contrib/csrc/cudnn-frontend/include")],
-                extra_compile_args={"cxx": ["-O3"] + version_dependent_macros + generator_flag},
-            )
-        )
-
-
-if "--fused_conv_bias_relu" in sys.argv:
-    sys.argv.remove("--fused_conv_bias_relu")
-    raise_if_cuda_home_none("--fused_conv_bias_relu")
-    if check_cudnn_version_and_warn("--fused_conv_bias_relu", 8400):
-        subprocess.run(["git", "submodule", "update", "--init", "apex/contrib/csrc/cudnn-frontend/"])
-        ext_modules.append(
-            CUDAExtension(
-                name="fused_conv_bias_relu",
-                sources=["apex/contrib/csrc/conv_bias_relu/conv_bias_relu.cpp"],
-                include_dirs=[os.path.join(this_dir, "apex/contrib/csrc/cudnn-frontend/include")],
-                extra_compile_args={"cxx": ["-O3"] + version_dependent_macros + generator_flag},
-            )
-        )
-
-
 setup(
     name="apex",
     version="0.1",
     packages=find_packages(
-        exclude=("build", "csrc", "include", "tests", "dist", "docs", "tests", "examples", "apex.egg-info",)
+        exclude=(
+            "build",
+            "csrc",
+            "include",
+            "tests",
+            "dist",
+            "docs",
+            "tests",
+            "examples",
+            "apex.egg-info",
+        )
     ),
     install_requires=["packaging>20.6"],
     description="PyTorch Extensions written by NVIDIA",

@@ -1,5 +1,5 @@
 #!/bin/sh
 
-docker build --platform=linux/amd64 -t apex-amd64 .
+docker build -t apex-builder .
 
-docker run -v "$(pwd):/mnt/host/" apex-amd64 sh -c "cp /mnt/build/*.whl /mnt/host/"
+docker run -v "$(pwd):/mnt/host/" apex-builder sh -c "cp /mnt/build/*.whl /mnt/host/"
